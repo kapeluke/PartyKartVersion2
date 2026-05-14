@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PartyKart Tournament</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <!-- Fun, Cartoony Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@600;800;900&display=swap" rel="stylesheet">
+
+    <style>
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator { display: flex; }
+        .htmx-request.htmx-indicator { display: flex; }
+        
+        .font-kart { font-family: 'Fredoka One', cursive; letter-spacing: 0.05em; }
+        body { font-family: 'Nunito', sans-serif; }
+
+        .btn-tactile { transition: all 0.1s ease; }
+        .btn-tactile:active {
+            transform: translateY(4px);
+            box-shadow: 0px 0px 0px rgba(0,0,0,1) !important;
+        }
+
+        .bg-checkered {
+            background-image: linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000), 
+                              linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+        }
+    </style>
+</head>
+<body class="bg-sky-300 min-h-screen text-gray-900" hx-target="body" hx-swap="outerHTML">
+
+    <!-- TOP NAV -->
+    <nav class="bg-red-500 border-b-4 border-black p-3 relative overflow-hidden shadow-[0_4px_0_rgba(0,0,0,0.2)] z-10">
+        <div class="absolute top-0 left-0 w-full h-2 bg-checkered opacity-30"></div>
+        
+        <div class="max-w-7xl mx-auto flex justify-between items-center relative z-10 mt-2">
+            <div class="flex items-center gap-3">
+                <div class="bg-yellow-400 p-2 rounded-full border-2 border-black shadow-[2px_2px_0_#000] rotate-[-10deg]">
+                    <i class="fa-solid fa-flag-checkered text-2xl text-black"></i>
+                </div>
+                <h1 class="font-kart text-3xl text-white drop-shadow-[2px_2px_0_#000] tracking-wide">
+                    PARTYKART
+                </h1>
+            </div>
+            
+            {% if not state.is_active %}
+            <!-- LOAD/SAVE for Setup View -->
+            <div class="flex gap-3">
+                <input type="file" id="config-upload" name="file" accept=".json" class="hidden" 
+                       hx-post="/api/import-state" 
+                       hx-encoding="multipart/form-data" 
+                       hx-target="body" 
+                       hx-swap="outerHTML">
+                
+                <button onclick="document.getElementById('config-upload').click()" class="btn-tactile px-4 py-2 bg-blue-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
+                    <i class="fa-solid fa-folder-open mr-1"></i> LOAD
+                </button>
+                <button type="button" onclick="downloadExport()" class="btn-tactile px-4 py-2 bg-green-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
+                    <i class="fa-solid fa-download mr-1"></i> SAVE
+                </button>
+            </div>
+            {% else %}
+            <!-- In-Tournament View controls -->
+                {% if state.current_race_idx < state.races|length %}
+                <div class="flex gap-3">
+                    <button class="btn-tactile px-4 py-2 bg-blue-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
+                        <i class="fa-solid fa-user-plus mr-1"></i> New
+                    </button>
+                    <button class="btn-tactile px-4 py-2 bg-orange-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
+                        <i class="fa-solid fa-user-minus mr-1"></i> Drop
+                    </button>
+                </div>
+                {% endif %}
+            {% endif %}
+        </div>
+    </nav>
+
+    <main class="p-4 md:p-8 max-w-7xl mx-auto">
+        
+        <!-- ========================================== -->
+        <!-- SETUP VIEW -->
+        <!-- ========================================== -->
+        {% if not state.is_active %}
+        <div class="max-w-3xl mx-auto mt-6">
+            <div class="bg-white p-8 rounded-3xl border-4 border-black shadow-[8px_8px_0_#000] relative">
+                
+                <i class="fa-solid fa-star absolute -top-4 -left-4 text-4xl text-yellow-400 drop-shadow-[2px_2px_0_#000] rotate-[-15deg]"></i>
+                <i class="fa-solid fa-certificate absolute -bottom-4 -right-4 text-5xl text-red-500 drop-shadow-[2px_2px_0_#000] rotate-[15deg]"></i>
+
+                <h2 class="font-kart text-4xl mb-8 text-center text-blue-600 drop-shadow-[2px_2px_0_#000]">TOURNAMENT SETUP</h2>
+                
+                <!-- Added ID "setup-form" so we can grab it with JS for exporting -->
+                <form id="setup-form" hx-post="/generate" hx-indicator="#loading-overlay" class="space-y-8">
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Player Slider -->
+                        <div class="bg-blue-50 p-5 rounded-2xl border-4 border-black shadow-[4px_4px_0_#000] transform rotate-[-1deg]">
+                            <label class="block font-kart text-xl mb-3 text-gray-800">NUMBER OF PLAYERS</label>
+                            <div class="flex items-center gap-4">
+                                <input type="range" name="p_count" min="5" max="25" value="{{ state.p_count }}" 
+                                       class="w-full h-3 bg-blue-200 rounded-lg appearance-none cursor-pointer border-2 border-black"
+                                       oninput="this.nextElementSibling.value = this.value"
+                                       hx-get="/components/player_inputs" 
+                                       hx-target="#player-inputs" 
+                                       hx-swap="innerHTML"
+                                       hx-trigger="change, mouseup delay:200ms">
+                                <output class="font-kart text-3xl text-blue-600 w-10 text-center drop-shadow-[1px_1px_0_#000]">{{ state.p_count }}</output>
+                            </div>
+                        </div>
+
+                        <!-- Races Slider -->
+                        <div class="bg-green-50 p-5 rounded-2xl border-4 border-black shadow-[4px_4px_0_#000] transform rotate-[1deg]">
+                            <label class="block font-kart text-xl mb-3 text-gray-800">NUMBER OF RACES EACH</label>
+                            <div class="flex items-center gap-4">
+                                <input type="range" name="n_races" min="3" max="7" value="{{ state.n_races }}" 
+                                       class="w-full h-3 bg-green-200 rounded-lg appearance-none cursor-pointer border-2 border-black"
+                                       oninput="this.nextElementSibling.value = this.value">
+                                <output class="font-kart text-3xl text-green-600 w-10 text-center drop-shadow-[1px_1px_0_#000]">{{ state.n_races }}</output>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Names Box -->
+                    <div class="bg-gray-100 p-6 rounded-2xl border-4 border-black shadow-[4px_4px_0_#000]">
+                        <h3 class="font-kart text-2xl mb-4 text-gray-800">RACER NAMES</h3>
+                        <div id="player-inputs" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {% for i in range(state.p_count) %}
+                            <div class="flex flex-col relative">
+                                <span class="absolute -top-2 -left-2 bg-yellow-400 text-black font-bold border-2 border-black rounded-full w-6 h-6 flex items-center justify-center text-xs z-10">{{i+1}}</span>
+                                <input type="text" name="player_names" placeholder="Name" required
+                                       value="{% if i < state.players|length %}{{ state.players[i|int].name }}{% endif %}"
+                                       class="bg-white text-gray-900 border-2 border-black rounded-xl p-3 font-bold focus:ring-4 focus:ring-yellow-400 outline-none shadow-[2px_2px_0_#000]">
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- Submit -->
+                    <div class="flex justify-between items-center pt-4">
+                        <div class="flex items-center gap-4">
+                            <button type="button" onclick="document.getElementById('settings-dialog').showModal()" 
+                                    class="btn-tactile bg-gray-200 border-2 border-black rounded-xl px-4 py-2 font-bold shadow-[2px_2px_0_#000] hover:bg-gray-300">
+                                <i class="fa-solid fa-gear"></i> Tweaks
+                            </button>
+
+                            <button type="button" onclick="document.getElementById('modifiers-dialog').showModal()" 
+                                    class="btn-tactile bg-purple-400 border-2 border-black rounded-xl px-4 py-2 font-bold shadow-[2px_2px_0_#000] hover:bg-purple-300">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> Modifiers
+                            </button>
+                            
+                            <span id="save-toast" class="font-bold text-green-500 opacity-0 transition-opacity duration-300">
+                                <i class="fa-solid fa-check-circle mr-1"></i> Saved!
+                            </span>
+                        </div>
+                        
+                        <button type="submit" 
+                                class="btn-tactile bg-yellow-400 hover:bg-yellow-300 text-black font-kart text-xl py-4 px-10 rounded-2xl border-4 border-black shadow-[6px_6px_0_#000]">
+                            <i class="fa-solid fa-play mr-2"></i> START ENGINE!
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- DIALOGS -->
+        <!-- ========================================== -->
+
+        <!-- Hyperparameters Dialog -->
+        <dialog id="settings-dialog" 
+                hx-on:settings-saved="
+                    this.close(); 
+                    let toast = document.getElementById('save-toast'); 
+                    toast.classList.remove('opacity-0'); 
+                    setTimeout(() => toast.classList.add('opacity-0'), 3000);
+                "
+                class="bg-white text-black p-8 rounded-3xl border-4 border-black shadow-[8px_8px_0_#000] backdrop:bg-black/60 backdrop:backdrop-blur-sm w-full max-w-md">
+            
+            <form hx-post="/api/save-hyperparameters" hx-swap="none" class="space-y-8">
+                <h3 class="font-kart text-2xl mb-4 text-blue-600 drop-shadow-[1px_1px_0_#000]">Advanced Settings</h3>
+                <div class="space-y-4 font-bold max-h-[60vh] overflow-y-auto p-2">
+                    <div>
+                        <label class="block mb-2">Strict race limit?</label>
+                        <input type="checkbox" name="strict_R" value="true" {% if state.hyperparameters.strict_R %}checked{% endif %} class="w-full bg-gray-100 border-2 border-black rounded-xl p-1 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Strict race limit tolerance</label>
+                        <input type="number" name="strictness_tolerance" value="{{ state.hyperparameters.strictness_tolerance }}" min="0" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Cuts per stencil rotation</label>
+                        <input type="number" name="cuts_per_rotation" value="{{ state.hyperparameters.cuts_per_rotation }}" min="0" max="4" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Number of stencils considered</label>
+                        <input type="number" name="num_stencils" value="{{ state.hyperparameters.num_stencils }}" min="0" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Super-pool size</label>
+                        <input type="number" name="pool_size" value="{{ state.hyperparameters.pool_size }}" min="0" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Number of selection restarts</label>
+                        <input type="number" name="num_restarts" value="{{ state.hyperparameters.num_restarts }}" min="0" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Random seed</label>
+                        <input type="number" name="seed" value="{{ state.hyperparameters.seed }}" min="0" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Weight given to gap variance</label>
+                        <input type="number" name="gap_variance_weight" value="{{ state.hyperparameters.gap_variance_weight }}" min="0" step="0.01" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Number of Simulated Annealing climbers</label>
+                        <input type="number" name="num_climbers" value="{{ state.hyperparameters.num_climbers }}" min="0" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Number of Simulated Annealing steps</label>
+                        <input type="number" name="num_steps" value="{{ state.hyperparameters.num_steps }}" min="0" step="1" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Selection ILP timeout (seconds)</label>
+                        <input type="number" name="ilp_timeout" value="{{ state.hyperparameters.ilp_timeout }}" min="0" step="0.5" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                    <div>
+                        <label class="block mb-2">Ordering MILP timeout (seconds)</label>
+                        <input type="number" name="milp_timeout" value="{{ state.hyperparameters.milp_timeout }}" min="0" step="0.5" class="w-full bg-gray-100 border-2 border-black rounded-xl p-3 shadow-[2px_2px_0_#000]">
+                    </div>
+                </div>
+                <div class="mt-8 flex justify-end gap-3">
+                    <button type="button" onclick="document.getElementById('settings-dialog').close()" class="btn-tactile px-6 py-3 bg-gray-200 text-gray-800 font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                        CANCEL
+                    </button>
+                    <button type="submit" class="btn-tactile px-6 py-3 bg-green-500 text-white font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                        SAVE
+                    </button>
+                </div>
+            </form>
+        </dialog>
+
+        <!-- Modifiers Dialog -->
+        <dialog id="modifiers-dialog" 
+                hx-on:modifiers-saved="
+                    this.close(); 
+                    let toast = document.getElementById('save-toast'); 
+                    toast.classList.remove('opacity-0'); 
+                    toast.innerHTML = '<i class=\'fa-solid fa-wand-magic-sparkles mr-1\'></i> Modifiers Saved!';
+                    setTimeout(() => toast.classList.add('opacity-0'), 3000);
+                "
+                class="bg-white text-black p-8 rounded-3xl border-4 border-black shadow-[12px_12px_0_#000] backdrop:bg-black/60 backdrop:backdrop-blur-sm w-full max-w-2xl">
+            
+            <div class="flex justify-between items-center mb-6 border-b-4 border-black pb-4">
+                <h3 class="font-kart text-3xl text-purple-600 drop-shadow-[2px_2px_0_#000]">
+                    <i class="fa-solid fa-dice text-purple-400 drop-shadow-[1px_1px_0_#000] mr-2 rotate-12"></i> 
+                    RULE MODIFIERS
+                </h3>
+                <button type="button" 
+                        hx-get="/components/new-modifier-row" 
+                        hx-target="#modifier-rows" 
+                        hx-swap="beforeend"
+                        class="btn-tactile px-4 py-2 bg-blue-500 text-white font-black border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                    <i class="fa-solid fa-plus mr-1"></i> ADD ROW
+                </button>
+            </div>
+
+            <form hx-post="/api/save-modifiers" hx-swap="none">
+                <div id="modifier-rows" class="space-y-6 max-h-[60vh] overflow-y-auto p-2 mb-6">
+                    {% if state.modifiers %}
+                        {% for mod in state.modifiers %}
+                        <div class="modifier-row bg-purple-100 border-4 border-black rounded-2xl p-4 shadow-[4px_4px_0_#000] relative group">
+                            <button type="button" onclick="this.closest('.modifier-row').remove()" class="absolute -top-3 -right-3 bg-red-500 text-white w-8 h-8 rounded-full border-2 border-black font-bold shadow-[2px_2px_0_#000] opacity-0 group-hover:opacity-100 transition-opacity btn-tactile">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                            <div class="flex flex-col gap-3">
+                                <div class="flex gap-4 items-end">
+                                    <div class="w-24">
+                                        <label class="block text-xs font-black tracking-wider text-gray-600 mb-1 uppercase">Channel</label>
+                                        <input type="number" name="channel" value="{{ mod.channel }}" min="0" class="w-full bg-white border-2 border-black rounded-xl p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none shadow-[2px_2px_0_#000]">
+                                    </div>
+                                    <div class="flex-1">
+                                        <label class="block text-xs font-black tracking-wider text-gray-600 mb-1 uppercase">Short Name</label>
+                                        <input type="text" name="short_text" value="{{ mod.short_text }}" class="w-full bg-white border-2 border-black rounded-xl p-2 font-kart text-lg text-blue-600 focus:ring-4 focus:ring-yellow-400 outline-none shadow-[2px_2px_0_#000]">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-black tracking-wider text-gray-600 mb-1 uppercase">Full Rule Description</label>
+                                    <textarea name="description" rows="2" class="w-full bg-white border-2 border-black rounded-xl p-2 text-sm font-bold text-gray-800 focus:ring-4 focus:ring-yellow-400 outline-none shadow-[2px_2px_0_#000] resize-y">{{ mod.description }}</textarea>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="modifier-row bg-purple-100 border-4 border-black rounded-2xl p-4 shadow-[4px_4px_0_#000] relative group">
+                            <button type="button" onclick="this.closest('.modifier-row').remove()" class="absolute -top-3 -right-3 bg-red-500 text-white w-8 h-8 rounded-full border-2 border-black font-bold shadow-[2px_2px_0_#000] opacity-0 group-hover:opacity-100 transition-opacity btn-tactile">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                            <div class="flex flex-col gap-3">
+                                <div class="flex gap-4 items-end">
+                                    <div class="w-24">
+                                        <label class="block text-xs font-black tracking-wider text-gray-600 mb-1 uppercase">Channel</label>
+                                        <input type="number" name="channel" min="0" placeholder="0" class="w-full bg-white border-2 border-black rounded-xl p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none shadow-[2px_2px_0_#000]">
+                                    </div>
+                                    <div class="flex-1">
+                                        <label class="block text-xs font-black tracking-wider text-gray-600 mb-1 uppercase">Short Name</label>
+                                        <input type="text" name="short_text" placeholder="e.g. Eat Grass" class="w-full bg-white border-2 border-black rounded-xl p-2 font-kart text-lg text-blue-600 focus:ring-4 focus:ring-yellow-400 outline-none shadow-[2px_2px_0_#000]">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-black tracking-wider text-gray-600 mb-1 uppercase">Full Rule Description</label>
+                                    <textarea name="description" rows="2" placeholder="Explain the exact rules of this modifier..." class="w-full bg-white border-2 border-black rounded-xl p-2 text-sm font-bold text-gray-800 focus:ring-4 focus:ring-yellow-400 outline-none shadow-[2px_2px_0_#000] resize-y"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                </div>
+
+                <div class="flex justify-end gap-3 pt-4 border-t-4 border-black">
+                    <button type="button" onclick="document.getElementById('modifiers-dialog').close()" class="btn-tactile px-6 py-3 bg-gray-200 text-gray-800 font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                        CANCEL
+                    </button>
+                    <button type="submit" class="btn-tactile px-6 py-3 bg-purple-500 text-white font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                        SAVE MODIFIERS
+                    </button>
+                </div>
+            </form>
+        </dialog>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="htmx-indicator fixed inset-0 bg-blue-500/90 z-50 flex-col items-center justify-center backdrop-blur-md">
+            <div class="flex-row items-center justify-center">
+                <i class="fa-solid fa-motorcycle fa-bounce text-7xl text-yellow-400 mr-6 mb-6 drop-shadow-[4px_4px_0_#000]"></i>
+                <i class="fa-solid fa-car-side fa-bounce text-7xl text-yellow-400 ml-6 mb-6 drop-shadow-[4px_4px_0_#000]"></i>
+            </div>
+            <h2 class="font-kart text-4xl text-white drop-shadow-[3px_3px_0_#000] text-center px-4">
+                BUILDING THE TRACKS...
+            </h2>
+            <p class="font-bold text-blue-100 mt-4 text-lg bg-black/20 px-4 py-2 rounded-full border-2 border-black/30">Just a moment! (Estimated time: 60s)</p>
+        </div>
+
+        {% else %}
+            <!-- ========================================== -->
+            <!-- TOURNAMENT VIEW -->
+            <!-- ========================================== -->
+        
+            {% if state.current_race_idx < state.races|length %}
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[calc(100vh-120px)] mt-4">
+                
+                <!-- LEFT: Leaderboard -->
+                <div class="lg:col-span-3 bg-white rounded-3xl border-4 border-black shadow-[6px_6px_0_#000] flex flex-col overflow-hidden max-h-[85vh]">
+                    <div class="bg-yellow-400 p-4 border-b-4 border-black text-center">
+                        <h2 class="font-kart text-2xl drop-shadow-[1px_1px_0_#000]"><i class="fa-solid fa-trophy mr-2"></i> STANDINGS</h2>
+                    </div>
+                    <div class="overflow-y-auto flex-1 p-3 space-y-2 bg-yellow-50">
+                        {% for p in leaderboard %}
+                        <div class="flex items-center justify-between p-3 rounded-xl border-2 border-black shadow-[2px_2px_0_#000] bg-white
+                            {% if loop.index == 1 %}!bg-yellow-300 transform scale-105 my-3{% elif loop.index == 2 %}!bg-gray-200{% elif loop.index == 3 %}!bg-orange-300{% endif %}">
+                            <div class="flex items-center gap-3">
+                                <span class="font-kart text-xl w-6 text-center 
+                                    {% if loop.index == 1 %}text-white drop-shadow-[1px_1px_0_#000]{% else %}text-gray-800{% endif %}">
+                                    {{loop.index}}
+                                </span>
+                                <span class="font-black text-lg truncate w-24">{{p.name}}</span>
+                            </div>
+                            <span class="font-kart text-xl bg-black text-white px-2 py-1 rounded-lg border-2 border-black shadow-[inset_0_2px_0_rgba(255,255,255,0.3)]">{{p.points}}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- CENTER: Current Race -->
+                <div class="lg:col-span-6 flex flex-col">
+                    
+                    <!-- We pull current_race out up here so the header can access its modifiers! -->
+                    {% set current_race = state.races[state.current_race_idx] %}
+
+                    <div class="flex justify-between items-end mb-4 px-2">
+                        <div class="bg-white border-4 border-black rounded-2xl px-6 py-2 shadow-[4px_4px_0_#000] transform -rotate-2">
+                            <h2 class="font-kart text-2xl text-red-500 drop-shadow-[1px_1px_0_#000]">
+                                RACE {{ state.current_race_idx + 1 }} <span class="text-gray-400 text-lg">/ {{ state.races|length }}</span>
+                            </h2>
+                        </div>
+                        
+                        <!-- Toggle Button -->
+                        <button type="button" onclick="toggleRaceView()" id="race-view-toggle" class="btn-tactile text-sm font-bold bg-purple-400 border-2 border-black rounded-xl px-4 py-2 shadow-[2px_2px_0_#000] hover:bg-purple-300 text-white">
+                            Modifiers <i class="fa-solid fa-arrow-right ml-1"></i>
+                        </button>
+                    </div>
+
+                    <!-- ROSTER VIEW (Default Active) -->
+                    <form id="roster-view" hx-post="/submit_race" class="bg-white rounded-3xl border-4 border-black shadow-[8px_8px_0_#000] p-6 sm:p-8 flex-1 flex flex-col justify-center relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMiIgZmlsbD0iIzAwMCIgZmlsbC1vcGFjaXR5PSIwLjA1Ii8+PC9zdmc+')]">
+                        <div class="space-y-4 relative z-10">
+                            {% for player_id in current_race.players %}
+                            <div class="flex items-center justify-between bg-blue-50 p-3 sm:p-4 rounded-2xl border-4 border-black shadow-[4px_4px_0_#000]">
+                                <h3 class="font-kart text-2xl sm:text-3xl text-blue-700 drop-shadow-[1px_1px_0_#000] truncate max-w-[50%]">{{ state.players[player_id|int].name }}</h3>
+                                
+                                <select name="pos_{{player_id}}" required class="bg-white font-kart text-xl py-3 px-4 rounded-xl border-4 border-black focus:border-red-500 focus:ring-0 outline-none text-center w-28 sm:w-32 cursor-pointer shadow-[inset_0_4px_0_rgba(0,0,0,0.05)] appearance-none relative">
+                                    <option value="" disabled selected>PLACE</option>
+                                    <option value="1">1st</option>
+                                    <option value="2">2nd</option>
+                                    <option value="3">3rd</option>
+                                    {% if current_race.players|length >= 4 %}
+                                    <option value="4">4th</option>
+                                    {% endif %}
+                                </select>
+                            </div>
+                            {% endfor %}
+                        </div>
+
+                        <button type="submit" class="btn-tactile mt-10 w-full py-5 rounded-2xl bg-green-500 hover:bg-green-400 text-white font-kart text-3xl border-4 border-black shadow-[6px_6px_0_#000] tracking-wide drop-shadow-[2px_2px_0_#000]">
+                            NEXT RACE <i class="fa-solid fa-angles-right ml-2"></i>
+                        </button>
+                    </form>
+
+                    <!-- MODIFIERS VIEW (Hidden by Default) -->
+                    <div id="modifiers-view" class="hidden bg-purple-50 rounded-3xl border-4 border-black shadow-[8px_8px_0_#000] p-6 sm:p-8 flex-1 flex-col justify-start relative overflow-y-auto bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMiIgZmlsbD0iIzAwMCIgZmlsbC1vcGFjaXR5PSIwLjA1Ii8+PC9zdmc+')]">
+                        <h3 class="font-kart text-3xl text-purple-600 mb-6 drop-shadow-[1px_1px_0_#000] text-center border-b-4 border-black pb-4">
+                            <i class="fa-solid fa-dice text-purple-400 drop-shadow-[1px_1px_0_#000] mr-2 rotate-12"></i> 
+                            ACTIVE MODIFIERS
+                        </h3>
+                        
+                        <div class="space-y-6 relative z-10">
+                            {% if current_race.modifiers %}
+                                {% for mod in current_race.modifiers %}
+                                <div class="bg-white p-5 rounded-2xl border-4 border-black shadow-[4px_4px_0_#000] transform rotate-[{{ [1, -1, 0, 2, -2]|random }}deg]">
+                                    <h4 class="font-kart text-2xl text-blue-600 drop-shadow-[1px_1px_0_#000] mb-2">{{ mod.short_text }}</h4>
+                                    <p class="font-bold text-gray-700 text-sm md:text-base leading-relaxed">{{ mod.description }}</p>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="bg-gray-100 p-8 rounded-2xl border-4 border-black border-dashed text-center">
+                                    <p class="font-bold text-xl text-gray-500">No modifiers for this race! Play standard rules.</p>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- RIGHT: Upcoming Races -->
+                <div class="lg:col-span-3 flex flex-col">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="bg-white border-4 border-black rounded-2xl px-4 py-2 shadow-[4px_4px_0_#000] inline-block rotate-2">
+                            <h2 class="font-kart text-xl text-gray-800">ON DECK</h2>
+                        </div>
+                        
+                        {% if state.history|length > 0 %}
+                        <button hx-post="/undo" class="btn-tactile text-sm font-bold bg-white border-2 border-black rounded-xl px-3 py-1 shadow-[2px_2px_0_#000] hover:bg-gray-100 text-red-500 whitespace-nowrap ml-2">
+                            <i class="fa-solid fa-rotate-left mr-1"></i> Undo
+                        </button>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="space-y-4">
+                        {% for offset in range(1, 4) %}
+                            {% set future_idx = state.current_race_idx + offset %}
+                            {% if future_idx < state.races|length %}
+                                {% set future_race = state.races[future_idx] %}
+                                <div class="bg-white/80 backdrop-blur p-4 rounded-2xl border-4 border-black shadow-[4px_4px_0_#000]" style="opacity: {{ 1 - (offset * 0.15) }}; transform: scale({{ 1 - (offset * 0.02) }})">
+                                    <div class="font-kart text-blue-500 mb-2">RACE {{ future_idx + 1 }}</div>
+                                    <div class="flex flex-wrap gap-2">
+                                        {% for player_id in future_race.players %}
+                                            <span class="px-2 py-1 bg-gray-100 font-bold text-sm rounded-lg border-2 border-black">
+                                                {{ state.players[player_id|int].name }}
+                                            </span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if (state.current_race_idx + 1) >= state.races|length %}
+                            <div class="text-center font-bold text-gray-800 bg-white/50 rounded-2xl border-4 border-black border-dashed p-6">
+                                No more races!
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+            {% else %}
+            <!-- PODIUM / COMPLETE SCREEN -->
+            <div class="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] mt-4 fade-in">
+                <h2 class="font-kart text-5xl md:text-7xl text-blue-600 drop-shadow-[3px_3px_0_#000] mb-16 transform -rotate-1">TOURNAMENT COMPLETE!</h2>
+
+                <div class="flex items-end justify-center gap-2 md:gap-8 h-64 mb-16 w-full max-w-5xl px-4 translate-y-8">
+                    
+                    <!-- LEFT CROWD -->
+                    <div class="hidden md:flex items-end gap-3 pb-2 mr-2 md:mr-6">
+                        <i class="fa-solid fa-child-reaching text-5xl text-pink-500 animate-bounce drop-shadow-[2px_2px_0_#000]" style="animation-delay: -0.2s;"></i>
+                        <i class="fa-solid fa-hands-clapping text-4xl text-blue-500 animate-bounce drop-shadow-[2px_2px_0_#000]" style="animation-delay: -0.7s;"></i>
+                        <i class="fa-solid fa-child-reaching text-6xl text-green-500 animate-bounce drop-shadow-[2px_2px_0_#000]" style="animation-delay: -0.4s;"></i>
+                    </div>
+
+                    <!-- 2ND PLACE -->
+                    {% if leaderboard|length > 1 %}
+                    <div class="flex flex-col items-center flex-1 transform">
+                        <div class="text-center mb-2 flex flex-col items-center">
+                            <i class="fa-solid fa-person-reaching text-5xl md:text-6xl text-gray-400 drop-shadow-[2px_2px_0_#000]"></i>
+                            <div class="font-black text-lg md:text-2xl truncate w-24 md:w-32 mt-2 bg-white px-2 py-1 border-2 border-black rounded shadow-[2px_2px_0_#000]">{{ leaderboard[1].name }}</div>
+                            <div class="font-kart text-gray-800 mt-2 bg-gray-200 px-3 py-1 rounded-full border-2 border-black">{{ leaderboard[1].points }} pts</div>
+                        </div>
+                        <div class="w-full h-32 bg-gray-300 border-4 border-black rounded-t-2xl shadow-[inset_-4px_-4px_0_rgba(0,0,0,0.1),_6px_6px_0_#000] flex items-center justify-center relative overflow-hidden">
+                            <div class="absolute inset-0 bg-gradient-to-b from-transparent to-black/10"></div>
+                            <span class="font-kart text-6xl text-gray-500 drop-shadow-[2px_2px_0_rgba(255,255,255,0.5)] z-10">2</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- 1ST PLACE -->
+                    {% if leaderboard|length > 0 %}
+                    <div class="flex flex-col items-center flex-1 z-10">
+                        <div class="text-center mb-2 flex flex-col items-center">
+                            <i class="fa-solid fa-crown text-4xl text-yellow-400 drop-shadow-[2px_2px_0_#000] mb-2 animate-bounce"></i>
+                            <i class="fa-solid fa-person-reaching text-6xl md:text-7xl text-yellow-400 drop-shadow-[2px_2px_0_#000]"></i>
+                            <div class="font-black text-xl md:text-3xl text-white bg-red-500 px-3 py-1 border-2 border-black rounded shadow-[2px_2px_0_#000] truncate w-28 md:w-40 mt-2">{{ leaderboard[0].name }}</div>
+                            <div class="font-kart text-yellow-900 mt-2 bg-yellow-400 px-4 py-1 rounded-full border-2 border-black">{{ leaderboard[0].points }} pts</div>
+                        </div>
+                        <div class="w-full h-44 bg-yellow-400 border-4 border-black rounded-t-2xl shadow-[inset_-4px_-4px_0_rgba(0,0,0,0.1),_6px_6px_0_#000] flex items-center justify-center relative overflow-hidden">
+                            <div class="absolute inset-0 bg-gradient-to-b from-transparent to-black/10"></div>
+                            <span class="font-kart text-7xl text-yellow-600 drop-shadow-[2px_2px_0_rgba(255,255,255,0.6)] z-10">1</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- 3RD PLACE -->
+                    {% if leaderboard|length > 2 %}
+                    <div class="flex flex-col items-center flex-1 transform">
+                        <div class="text-center mb-2 flex flex-col items-center">
+                            <i class="fa-solid fa-person-reaching text-4xl md:text-5xl text-orange-400 drop-shadow-[2px_2px_0_#000]"></i>
+                            <div class="font-black text-base md:text-xl truncate w-20 md:w-32 mt-2 bg-white px-2 py-1 border-2 border-black rounded shadow-[2px_2px_0_#000]">{{ leaderboard[2].name }}</div>
+                            <div class="font-kart text-orange-900 mt-2 bg-orange-300 px-3 py-1 rounded-full border-2 border-black">{{ leaderboard[2].points }} pts</div>
+                        </div>
+                        <div class="w-full h-24 bg-orange-400 border-4 border-black rounded-t-2xl shadow-[inset_-4px_-4px_0_rgba(0,0,0,0.1),_6px_6px_0_#000] flex items-center justify-center relative overflow-hidden">
+                            <div class="absolute inset-0 bg-gradient-to-b from-transparent to-black/10"></div>
+                            <span class="font-kart text-5xl text-orange-600 drop-shadow-[2px_2px_0_rgba(255,255,255,0.4)] z-10">3</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- RIGHT CROWD -->
+                    <div class="hidden md:flex items-end gap-3 pb-2 ml-2 md:ml-6">
+                        <i class="fa-solid fa-child-reaching text-6xl text-purple-500 animate-bounce drop-shadow-[2px_2px_0_#000]" style="animation-delay: -0.5s;"></i>
+                        <i class="fa-solid fa-star text-4xl text-yellow-400 animate-bounce drop-shadow-[2px_2px_0_#000]" style="animation-delay: -0.1s;"></i>
+                        <i class="fa-solid fa-child-reaching text-5xl text-orange-500 animate-bounce drop-shadow-[2px_2px_0_#000]" style="animation-delay: -0.8s;"></i>
+                    </div>
+
+                </div>
+
+                <div class="flex flex-wrap justify-center items-center gap-4 md:gap-6 mt-8 w-full px-4">
+                    {% if state.history|length > 0 %}
+                    <button hx-post="/undo" class="btn-tactile px-5 py-3 bg-white hover:bg-gray-100 text-red-500 rounded-2xl font-kart text-lg border-4 border-black shadow-[4px_4px_0_#000] transition-colors">
+                        <i class="fa-solid fa-rotate-left mr-2"></i> UNDO
+                    </button>
+                    {% endif %}
+                    
+                    <button onclick="document.getElementById('final-leaderboard-dialog').showModal()" class="btn-tactile px-6 py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-2xl font-kart text-2xl border-4 border-black shadow-[6px_6px_0_#000] transition-colors">
+                        <i class="fa-solid fa-list-ol mr-2"></i> SUMMARY
+                    </button>
+
+                    <button onclick="window.location.reload()" class="btn-tactile px-6 py-3 bg-green-500 hover:bg-green-400 text-white rounded-2xl font-kart text-2xl border-4 border-black shadow-[6px_6px_0_#000] transition-colors">
+                        PLAY AGAIN <i class="fa-solid fa-flag-checkered ml-2"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Final Leaderboard Dialog -->
+            <dialog id="final-leaderboard-dialog" 
+                    class="bg-white text-black p-6 md:p-8 rounded-3xl border-4 border-black shadow-[12px_12px_0_#000] backdrop:bg-black/60 backdrop:backdrop-blur-sm w-full max-w-md">
+                <div class="flex justify-between items-center mb-6 border-b-4 border-black pb-4">
+                    <h3 class="font-kart text-3xl text-blue-600 drop-shadow-[2px_2px_0_#000]">
+                        <i class="fa-solid fa-list-ol text-yellow-400 drop-shadow-[1px_1px_0_#000] mr-2"></i> 
+                        FULL RESULTS
+                    </h3>
+                    <button type="button" onclick="document.getElementById('final-leaderboard-dialog').close()" class="btn-tactile w-10 h-10 bg-red-500 text-white font-black border-4 border-black rounded-full shadow-[2px_2px_0_#000] flex items-center justify-center">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="overflow-y-auto max-h-[60vh] p-4 space-y-3 bg-yellow-50 rounded-2xl border-4 border-black shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)]">
+                    {% for p in leaderboard %}
+                    <div class="flex items-center justify-between p-3 rounded-xl border-4 border-black shadow-[4px_4px_0_#000] bg-white
+                        {% if loop.index == 1 %}!bg-yellow-300 transform scale-105 my-3{% elif loop.index == 2 %}!bg-gray-200{% elif loop.index == 3 %}!bg-orange-300{% endif %}">
+                        <div class="flex items-center gap-3">
+                            <span class="font-kart text-2xl w-8 text-center 
+                                {% if loop.index == 1 %}text-white drop-shadow-[1px_1px_0_#000]{% else %}text-gray-800{% endif %}">
+                                {{loop.index}}
+                            </span>
+                            <span class="font-black text-xl truncate max-w-[150px]">{{p.name}}</span>
+                        </div>
+                        <span class="font-kart text-2xl bg-black text-white px-3 py-1 rounded-xl border-2 border-black shadow-[inset_0_2px_0_rgba(255,255,255,0.3)]">{{p.points}} pt{% if p.points != 1 %}s{% endif %}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </dialog>
+            {% endif %}
+        {% endif %}
+
+    </main>
+
+    <!-- Scripts -->
+    <script>
+        function downloadExport() {
+            const form = document.getElementById('setup-form');
+            const formData = new FormData(form);
+            
+            fetch('/api/export-state', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'partykart_config.json';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            })
+            .catch(err => console.error("Export Failed", err));
+        }
+
+        // Toggles the Roster Form and the Modifiers display using tailwind utility classes
+        function toggleRaceView() {
+            const roster = document.getElementById('roster-view');
+            const modifiers = document.getElementById('modifiers-view');
+            const btn = document.getElementById('race-view-toggle');
+
+            if (roster.classList.contains('hidden')) {
+                // Switch to Roster
+                roster.classList.remove('hidden');
+                roster.classList.add('flex');
+                modifiers.classList.remove('flex');
+                modifiers.classList.add('hidden');
+                btn.innerHTML = 'Modifiers <i class="fa-solid fa-arrow-right ml-1"></i>';
+            } else {
+                // Switch to Modifiers
+                roster.classList.remove('flex');
+                roster.classList.add('hidden');
+                modifiers.classList.remove('hidden');
+                modifiers.classList.add('flex');
+                btn.innerHTML = '<i class="fa-solid fa-arrow-left mr-1"></i> Current Race';
+            }
+        }
+    </script>
+</body>
+</html>
