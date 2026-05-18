@@ -87,7 +87,7 @@ def simulated_annealing(rng:jnp.ndarray, A_sel:jnp.ndarray, N:int, num_climbers:
         probs = jnp.where(temp > 0, jnp.exp(-delta_E / (temp + EPSILON)), 0.0)
         # 4. Roll dice
         rand_vals = jax.random.uniform(step_key, shape=(num_climbers,))
-        # Accept choice if there's a beter move or if the dice roll went well
+        # Accept choice if there's a better move or if the dice roll went well
         accept = (delta_E < 0) | (rand_vals < probs)
         # 5. Update states
         next_pis = jnp.where(accept[:,None], proposed_pis, current_pis)
