@@ -46,6 +46,8 @@ This project is not complete yet, and there's a few things remaining:
 1. The ability to _Add_ and _Drop_ players in the middle of the tournament. This problem is complex and requires significant effort. Should be done it soon
 1. The _Play Again_ button at the end screen does not work. It should bring you back to the home screen or first race
 1. Add a way for the user to return to the home screen in the application, other than just closing it down and reopening it
+1. Add a way for the user to override the points given for 1st, 2nd, 3rd, and 4th place. Currently this is hardcoded in main.py
+1. Add a way for the user to input custom points (outside of the placed positions) for a specific user in a specific race
 1. Provide accurate estimates to the user depending on their choice of hyperparameters, $P$, and $N$, how how the solver might actually take to solve the problem. This is lower priority and requires potentially profiling the code in a sort of 'hyperparameter sensititvity' table and inter/extrapolating between values
 1. Compile it all into a neat executable rather than forcing the user to install everything manually. The user should be able to open it as a desktop application from a `.exe` file rather than running a command in their terminal and needing to visit their browser
 
