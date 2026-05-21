@@ -44,6 +44,8 @@ Steps to operate:
 ## Future/In progress work
 This project is not complete yet, and there's a few things remaining:
 1. The ability to _Add_ and _Drop_ players in the middle of the tournament. This problem is complex and requires significant effort. Should be done it soon
+1. Fix ghost race warning calculation. Some ghost races are added despite no warning being present sometimes
+1. Make ghost race warnings dependent on multiple people being added as well
 1. The _Play Again_ button at the end screen does not work. It should bring you back to the home screen or first race
 1. Fix the checkbox in Tweaks to be prettier
 1. Add a way for the user to return to the home screen in the application, other than just closing it down and reopening it
