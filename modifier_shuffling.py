@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 from typing import Union
 
 
@@ -13,29 +14,34 @@ def collapse_modifiers_to_lists(modifiers_list:list[dict[str,Union[int,str]]]) -
 
 
 def shuffle_out_modifiers(seed:int, number_of_races:int, modifiers_list:list[dict[str,Union[int,str]]]) -> list[list[dict[str,str]]]:
+    """Returns a list (per race) of a list (per channel) of modifiers.  
+    The returned list will be AT LEAST the size of modifiers_list. Not necessarily exact.
+    You may trim it if you wish.
+    """
     modifiers = collapse_modifiers_to_lists(modifiers_list)
     number_of_modifiers_per_channel = {channel:len(modifiers[channel]) for channel in modifiers.keys()}
+    lcm = np.lcm.reduce(list(number_of_modifiers_per_channel.values()))
+    # print(f"{lcm=}")
+    modifier_list_length = int(jnp.ceil(number_of_races / lcm) * lcm)
     rng = jax.random.key(seed)
     shuffled_modifiers:dict[int,list[dict[str,str]]] = {channel:[] for channel in modifiers.keys()}
     # Shuffle each channel individually
     for channel in modifiers:
         num_modifiers = number_of_modifiers_per_channel[channel] # number of modifiers in the channel
-        number_of_repeats_needed = int(jnp.ceil(number_of_races / num_modifiers)) # how many times we gotta multiply the list
+        number_of_repeats_needed = int(modifier_list_length / num_modifiers) # how many times we gotta multiply the list
         # shuffle the channels as many times as we need repeats
         for repeat in range(number_of_repeats_needed):
             rng, shuffle_key = jax.random.split(rng)
             indices = jax.random.permutation(shuffle_key, num_modifiers)
             for idx in indices:
                 shuffled_modifiers[channel].append(modifiers[channel][int(idx)])
-        # cap the list of modifiers off at the number of races we need
-        shuffled_modifiers[channel] = shuffled_modifiers[channel][:number_of_races]
     # transpose it such that we're grouping by race_idx rather than channel
     modifiers_per_race = [
         [
             shuffled_modifiers[channel][race_idx]
             for channel in modifiers
         ]
-        for race_idx in range(number_of_races)
+        for race_idx in range(modifier_list_length)
     ]
     return modifiers_per_race
 
@@ -51,7 +57,8 @@ if __name__ == '__main__':
         {'channel': 2, 'short_text': 'Partner Up', 'description': "test partner."},
         {'channel': 3, 'short_text': 'Test channel 3', 'description': 'test channel 3.'}
     ]
-    number_of_races = 7
+    number_of_races = 13
     seed = 42
     modifiers_per_race = shuffle_out_modifiers(seed, number_of_races, test_modifiers)
-    print('\n'.join(repr(v) for v in modifiers_per_race))
+    print(f"{len(modifiers_per_race)=}")
+    print('\n'.join(', '.join(d['short_text'] for d in race) for race in modifiers_per_race))
