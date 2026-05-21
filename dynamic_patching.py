@@ -28,15 +28,17 @@ RACE_COSTS_BY_SIZE = {
 
 
 def _core_targets(A:jnp.ndarray, F:int) -> jnp.ndarray:
-    """Returns the number of races needed for every player in the incidence matrix `A` after `F` races have already completed."""
-    N = A.sum(1)[0]
-    completed_races = A[:,:F]
-    races_needed_for_existing_racers = N - completed_races.sum(1)
-    return races_needed_for_existing_racers
+    """Returns the number of races needed for every player in the incidence matrix `A` 
+    after `F` races have already completed. It should be aware of dropped players.
+    """
+    # FIX: Use each player's individual lifetime target currently recorded in the schedule
+    individual_lifetime_targets = A.sum(1)
+    completed_races = A[:,:F].sum(1)
+    return individual_lifetime_targets - completed_races
 
 
 # -------------- GHOST RACES THRESHOLD HANDLING --------------
-def _ghost_race_add_safe_boundaries(core_targets:jnp.ndarray) -> tuple[int,int]:
+def _ghost_race_add_safe_boundaries(core_targets:jnp.ndarray) -> jnp.ndarray:
     S_core = core_targets.sum()
     N_max_core = core_targets.max()
     safe_max = jnp.floor(S_core / 2)
@@ -47,27 +49,6 @@ def _ghost_race_add_safe_boundaries(core_targets:jnp.ndarray) -> tuple[int,int]:
 def get_ghost_safe_boundaries(A:jnp.ndarray, F:int) -> tuple[int,int]:
     safe_min, safe_max = _ghost_race_add_safe_boundaries(_core_targets(A, F))
     return int(safe_min), int(safe_max)
-
-
-def ghost_race_necessity(A:jnp.ndarray, F:int, boundaries:list[tuple[int,int]]) -> tuple[str,list[list[str]]]:
-    """Returns information on whether ghost race warnings exist or whether they will absolutely occur or not."""
-    num_new = len(boundaries)
-    core_targets = _core_targets(A, F)
-    safe_min, safe_max = _ghost_race_add_safe_boundaries(core_targets)
-    if safe_max > safe_min:
-        return ("The remaining core races are too unbalanced. Ghost races are mathematically unavoidable to finish the tournament.", [[]]*num_new)
-    warnings:list[list[str]] = []
-    for gary_min, gary_max in boundaries: 
-        this_player_warnings = []
-        if gary_max > safe_max:
-            this_player_warnings.append(f"If this player races more than {safe_max} times, Ghost races will be required because the original players do not have enough seats to fill the races.")
-        if gary_min < safe_min:
-            this_player_warnings.append(f"This player needs to race at least {safe_min} times to help fill out the remaining heats, otherwise Ghost races will be required.")
-        warnings.append(this_player_warnings)
-    if num_new > 1:
-        return ('Multiple new players at once might cause unknown interactions with each other and may cause Ghost races.', warnings)
-    else:
-        return ('', warnings)
 
 
 # -------------- SPECIES GENERATION (CANDIDATES) --------------
@@ -122,7 +103,6 @@ def _generate_patch_candidates(P_old:int, G:int, stencil:jnp.ndarray) -> jnp.nda
                 
     return jnp.array(all_cols).T
 
-
 def _generate_gary_centric_candidates(P_old:int, G:int) -> jnp.ndarray:
     """Generates races consisting exclusively of Garys (needed if G is large)."""
     P_total = P_old + G
@@ -148,7 +128,32 @@ def _construct_column_cost_vector(candidates:jnp.ndarray) -> jnp.ndarray:
     return costs
 
 
-def _get_masked_variance(A_sel:jnp.ndarray, active_indices:list[int]) -> float:
+def _calculate_dynamic_min_overlap(lower_bounds, upper_bounds) -> int:
+    """Dynamically determines the absolute mathematical floor for max_overlap
+    to prevent the ILP solver from wasting time on impossible bounds.
+    """
+    # Convert from JAX arrays to NumPy for safe condition checks
+    lb = np.array(lower_bounds)
+    ub = np.array(upper_bounds)
+    active_mask = ub > 0
+    N_active = int(np.sum(active_mask))
+    # If there are 1 or fewer active players, overlap limits are trivial
+    if N_active <= 1:
+        return 1
+    # BOUND 1: Individual player pigeonhole principle
+    # Assuming a conservative minimum race size of 3, each race gives a player 
+    # at least 2 pairings. These must be spread across the other (N_active - 1) players.
+    active_lowers = lb[active_mask]
+    pigeonhole_bound = int(np.max(np.ceil(2 * active_lowers / (N_active - 1))))
+    # BOUND 2: Global pair density floor
+    # Assuming a minimum race size of 3, total pairs generated >= total slots filled.
+    total_slots = int(np.sum(active_lowers))
+    unique_pairs = (N_active * (N_active - 1)) // 2
+    global_density_bound = int(np.ceil(total_slots / unique_pairs))
+    return max(1, pigeonhole_bound, global_density_bound)
+
+
+def _get_masked_variance(A_sel:jnp.ndarray, active_indices:jnp.ndarray) -> float:
     """Calculates pairwise variance while strictly ignoring dropped players."""
     C = A_sel @ A_sel.T
     C_active = C[jnp.ix_(active_indices, active_indices)]
@@ -159,46 +164,63 @@ def _get_masked_variance(A_sel:jnp.ndarray, active_indices:list[int]) -> float:
 def _solve_dynamic_ilp(A_super:jnp.ndarray, lower_bounds:jnp.ndarray, upper_bounds:jnp.ndarray, costs:jnp.ndarray, max_overlap:int, ilp_timeout:float, shuffle_seed:int=42) -> jnp.ndarray:
     num_candidates = A_super.shape[1]
     P_total = A_super.shape[0]
-    
     key = jax.random.key(shuffle_seed)
     shuffle_idx = jax.random.permutation(key, num_candidates)
     shuffled_incidence = A_super[:, shuffle_idx]
     shuffled_costs = costs[shuffle_idx]
-
     i_idx, j_idx = jnp.triu_indices(P_total, k=1)
     pairwise_overlaps = shuffled_incidence[i_idx] * shuffled_incidence[j_idx]
-    
     A_constrained = jnp.vstack([shuffled_incidence, pairwise_overlaps])
-    
     lb = jnp.concatenate([lower_bounds, jnp.zeros(len(i_idx))])
     ub = jnp.concatenate([upper_bounds, jnp.full(len(i_idx), max_overlap)])
-    
     A_sparse = csc_matrix(np.array(A_constrained))
     constraints = LinearConstraint(A_sparse, lb=lb, ub=ub)
-    bounds = Bounds(np.zeros(num_candidates), np.ones(num_candidates))
+    # FIX 1: Allow columns to be selected multiple times by setting bound ceiling to max remaining races
+    max_races = int(upper_bounds.max())
+    bounds = Bounds(np.zeros(num_candidates), np.full(num_candidates, max_races))
     integrality = np.ones(num_candidates)
     
     options = {'time_limit': ilp_timeout} 
     result = milp(c=np.array(shuffled_costs), constraints=constraints, integrality=integrality, bounds=bounds, options=options)
     
+    # FIX 2: Correctly duplicate columns when counts are greater than 1 using np.repeat
     if result.success and result.x is not None:
-        chosen_mask = np.round(result.x).astype(int)
-        selected_shuffled_indices = np.where(chosen_mask == 1)[0]
+        chosen_counts = np.round(result.x).astype(int)
+        selected_shuffled_indices = np.repeat(np.arange(num_candidates), chosen_counts)
+        if len(selected_shuffled_indices) == 0:
+            return None
         selected_original_indices = shuffle_idx[selected_shuffled_indices]
         return A_super[:, selected_original_indices]
     return None
 
 
-def _solve_dynamic_ilp_auto_relaxing(A_super, lower_bounds, upper_bounds, costs, ilp_timeout=10.0, shuffle_seed=42):
+def _solve_dynamic_ilp_auto_relaxing(A_super, lower_bounds, upper_bounds, costs, A_past, active_indices, ilp_timeout=10.0, shuffle_seed=42):
     current_max_overlap = 1
     absolute_ceiling = 6 
+    best_A_sel = None
+    best_variance = float('inf')
+    best_cost = float('inf')
     while current_max_overlap <= absolute_ceiling:
         A_sel = _solve_dynamic_ilp(A_super, lower_bounds, upper_bounds, costs, current_max_overlap, ilp_timeout, shuffle_seed=shuffle_seed)
         if A_sel is not None:
-            return A_sel
+            # Construct the full prospective schedule to see true global tournament variance
+            A_full_temp = jnp.concatenate([A_past, A_sel], axis=1)
+            # FIX: Calculate variance *strictly* masking out dropped/inactive players
+            current_variance = _get_masked_variance(A_full_temp, active_indices)
+            # Calculate tournament length/cost (fewer races = lower cost)
+            current_cost = float(_construct_column_cost_vector(A_sel).sum())
+            # Priority 1: Keep variance among active players to an absolute minimum
+            if current_variance < best_variance:
+                best_variance = current_variance
+                best_cost = current_cost
+                best_A_sel = A_sel
+            # Priority 2: Tie-breaker prefers shorter tournament lengths (lower cost)
+            elif np.isclose(current_variance, best_variance) and current_cost < best_cost:
+                best_variance = current_variance
+                best_cost = current_cost
+                best_A_sel = A_sel
         current_max_overlap += 1
-    return None
-
+    return best_A_sel
 
 # -------------- ORDER THE NEW RACES --------------
 def _sa_patch_ordering(A_past:jnp.ndarray, A_patch:jnp.ndarray, base_climbers:int=5000, base_steps:int=1500, seed:int=42) -> jnp.ndarray:
@@ -211,7 +233,6 @@ def _sa_patch_ordering(A_past:jnp.ndarray, A_patch:jnp.ndarray, base_climbers:in
     R_total = A_past.shape[1] + R_patch
     ratio = R_patch / R_total
     
-    # Scale climbers and steps down if the patch is very small compared to the full tournament
     num_climbers = max(500, int(base_climbers * ratio))
     steps = max(200, int(base_steps * ratio))
     
@@ -227,7 +248,7 @@ def _sa_patch_ordering(A_past:jnp.ndarray, A_patch:jnp.ndarray, base_climbers:in
         masked = jnp.where(A_full, indices, 999)
         player_races = jnp.sort(masked, axis=1)
         gaps = jnp.diff(player_races, axis=1)
-        valid_gaps = gaps < R # Ignore padded non-races
+        valid_gaps = gaps < R
         
         counts = A_full.sum(1)
         mu = jnp.where(counts > 1, (R - 1) / (counts - 1), 0.0)
@@ -276,7 +297,6 @@ def drop_players(super_pools:jnp.ndarray, A:jnp.ndarray, F:int, dropped_indices:
     P_old = A.shape[0]
     core_targets = np.array(_core_targets(A, F))
     
-    # By setting bounds to 0, the ILP will literally refuse to pick any candidate column with these players.
     for idx in dropped_indices:
         core_targets[idx] = 0
     core_targets = jnp.array(core_targets)
@@ -287,8 +307,30 @@ def drop_players(super_pools:jnp.ndarray, A:jnp.ndarray, F:int, dropped_indices:
     
     best_A_patch = None
     lowest_var = jnp.inf
+    
+    # Strictly typing active indices to a JAX array
     active_indices = jnp.array([i for i in range(P_old) if i not in dropped_indices])
     
+    # FIX 3: Generate active-player-only fallback combinations to prevent stencil starvation
+    active_cols = []
+    if len(active_indices) <= 25:
+        raw_active_list = [int(i) for i in active_indices]
+        for combo in combinations(raw_active_list, 4):
+            col = np.zeros(P_old, dtype=np.int32)
+            col[list(combo)] = 1
+            active_cols.append(col)
+        for combo in combinations(raw_active_list, 3):
+            col = np.zeros(P_old, dtype=np.int32)
+            col[list(combo)] = 1
+            active_cols.append(col)
+            
+    if active_cols:
+        A_active_combos = jnp.array(active_cols).T
+    else:
+        A_active_combos = jnp.zeros((P_old, 0), dtype=jnp.int32)
+    
+    A_past = A[:, :F]
+
     for chunk_idx in range(super_pools.shape[0]):
         chunk = super_pools[chunk_idx]
         matrices = []
@@ -296,13 +338,20 @@ def drop_players(super_pools:jnp.ndarray, A:jnp.ndarray, F:int, dropped_indices:
             A_part, _ = race_selection.generate_batch(P_old, chunk[i], race_selection.CUTS_PER_ROTATION)
             matrices.append(A_part)
             
+        # Append flexible combinations to the candidate pool
+        matrices.append(A_active_combos)
+            
         A_super = jnp.concatenate(matrices, axis=1)
-        A_super = jnp.clip(A_super, 0, 1) # Add this defensive line! Sanitize to strictly binary.
-        costs = _construct_column_cost_vector(A_super)
-        A_past = A[:, :F]
+        A_super = jnp.clip(A_super, 0, 1) # Defensive clip mapping back to pure binary state
+        costs = _construct_column_cost_vector(A_super)    
         
         for restart in range(num_restarts):
-            A_patch = _solve_dynamic_ilp_auto_relaxing(A_super, lower_bounds, upper_bounds, costs, ilp_timeout=ilp_timeout, shuffle_seed=seed+restart)
+            # Pass A_past and active_indices to ensure correct inner-loop sorting
+            A_patch = _solve_dynamic_ilp_auto_relaxing(
+                A_super, lower_bounds, upper_bounds, costs, 
+                A_past=A_past, active_indices=active_indices, 
+                ilp_timeout=ilp_timeout, shuffle_seed=seed+restart
+            )
             if A_patch is not None:
                 A_full_temp = jnp.concatenate([A_past, A_patch], axis=1)
                 var = _get_masked_variance(A_full_temp, active_indices)
@@ -338,7 +387,6 @@ def add_players(super_pools:jnp.ndarray, A:jnp.ndarray, F:int, boundaries:list[t
     lower_bounds = jnp.concatenate([races_needed_for_core_racers, boundaries_matrix[:,0]])
     upper_bounds = jnp.concatenate([races_needed_for_core_racers, boundaries_matrix[:,1]])
     
-    # Add zeros for Gary's incidences
     A_padded = jnp.vstack([A, jnp.zeros((G, A.shape[1]), dtype=jnp.int32)])
     A_past = A_padded[:, :F]
     
@@ -347,7 +395,6 @@ def add_players(super_pools:jnp.ndarray, A:jnp.ndarray, F:int, boundaries:list[t
     lowest_var = jnp.inf
     active_indices = jnp.arange(P_total)
     
-    # Go through the chunks and find the best incidence matrix
     for chunk_idx in range(super_pools.shape[0]):
         chunk = super_pools[chunk_idx]
         matrices = []
@@ -358,17 +405,21 @@ def add_players(super_pools:jnp.ndarray, A:jnp.ndarray, F:int, boundaries:list[t
         matrices.append(_generate_gary_centric_candidates(P_old, G))
         
         A_super = jnp.concatenate(matrices, axis=1)
-        A_super = jnp.clip(A_super, 0, 1) # Add this defensive line! Sanitize to strictly binary.
+        A_super = jnp.clip(A_super, 0, 1)
         costs = _construct_column_cost_vector(A_super)
         
         for restart in range(num_restarts):
-            A_patch = _solve_dynamic_ilp_auto_relaxing(A_super, lower_bounds, upper_bounds, costs, ilp_timeout=ilp_timeout, shuffle_seed=seed+restart)
+            A_patch = _solve_dynamic_ilp_auto_relaxing(
+                A_super, lower_bounds, upper_bounds, costs, 
+                A_past=A_past, active_indices=active_indices, 
+                ilp_timeout=ilp_timeout, shuffle_seed=seed+restart
+            )
             if A_patch is not None:
                 A_full_temp = jnp.concatenate([A_past, A_patch], axis=1)
                 var = _get_masked_variance(A_full_temp, active_indices)
                 if var < lowest_var:
                     lowest_var = var
-                    best_A_patch = A_patch
+                    best_A_patch = A_patch 
                     
     if best_A_patch is None:
         print("Failed to find a valid schedule to add players.")
@@ -381,19 +432,26 @@ def add_players(super_pools:jnp.ndarray, A:jnp.ndarray, F:int, boundaries:list[t
 
 
 if __name__ == "__main__":
-    # A = jnp.array([[0, 1, 1, 1],[0, 1, 1, 1],[1, 1, 0, 1],[1, 0, 1, 1],[1, 1, 1, 0]])
-    # print(A)
-    # Mock a super_pool for testing
-    # super_pools = jnp.array([[[1, 2, 1]]])
-    # # A_new = add_players(super_pools, A, F=2, boundaries=[(2,3),(2,3)], num_restarts=1)
-    # # print(A_new)
-    # A_new = drop_players(super_pools, A, F=2, dropped_indices=[3], num_restarts=1)
-    # print(A_new)
-
-    # A = jnp.array([[1,0,1,0,1,1,1,0,0,0,0,0],[0,1,1,0,0,0,1,0,0,1,0,1],[1,1,0,0,0,1,0,0,0,0,1,1],[0,0,1,0,1,0,0,1,1,0,1,0],[0,1,0,1,1,0,1,0,1,0,0,0],[1,0,0,1,0,0,0,1,1,0,0,1],[1,0,0,1,0,0,1,0,0,1,1,0],[0,0,0,0,1,1,0,0,1,1,0,1],[0,0,1,1,0,1,0,1,0,1,0,0]])
-    A = jnp.array([[1,0,0,1,0,1,0,1,0,1,0,0],[0,0,1,0,1,0,0,1,0,1,0,1],[1,0,1,0,0,1,0,0,1,0,0,1],[0,0,0,1,0,0,1,1,1,0,1,0],[0,1,0,1,0,0,1,0,0,1,0,1],[0,1,1,0,0,1,1,0,0,0,1,0],[0,1,0,0,1,1,0,0,1,1,0,0],[1,0,1,1,1,0,1,0,0,0,0,0],[1,1,0,0,1,0,0,1,0,0,1,0]])
-    R = A.shape[1]
-    N = int(A[0,:].sum())
-    P = A.shape[0]
-    safe_min, safe_max = get_ghost_safe_boundaries(A, F=11)
-    print(f"{R=}, {N=}, {P=}, {safe_min=}, {safe_max=}")
+    # Testing the severe drop scenario
+    A = jnp.array([
+        [1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0],
+        [1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0],
+        [0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1],
+        [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1],
+        [0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+        [0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0],
+        [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1],
+        [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0],
+        [1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0]
+    ])
+    super_pools = jnp.array([[[1, 1, 1]]])
+    
+    print("Testing Drop Players at F=0:")
+    A_new_f0 = drop_players(super_pools, A, F=0, dropped_indices=[4, 5, 6, 7, 8], num_restarts=1)
+    print(A_new_f0)
+    print("Patched R at F=0:", A_new_f0.shape[1])
+    
+    print("\nTesting Drop Players at F=1:")
+    A_new_f1 = drop_players(super_pools, A, F=1, dropped_indices=[4, 5, 6, 7, 8], num_restarts=1)
+    print(A_new_f1)
+    print("Patched R at F=1:", A_new_f1.shape[1])
