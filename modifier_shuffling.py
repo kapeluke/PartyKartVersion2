@@ -17,16 +17,19 @@ def shuffle_out_modifiers(seed:int, number_of_races:int, modifiers_list:list[dic
     number_of_modifiers_per_channel = {channel:len(modifiers[channel]) for channel in modifiers.keys()}
     rng = jax.random.key(seed)
     shuffled_modifiers:dict[int,list[dict[str,str]]] = {channel:[] for channel in modifiers.keys()}
+    # Shuffle each channel individually
     for channel in modifiers:
-        num_modifiers = number_of_modifiers_per_channel[channel]
-        number_of_repeats_needed = int(jnp.ceil(number_of_races / num_modifiers))
+        num_modifiers = number_of_modifiers_per_channel[channel] # number of modifiers in the channel
+        number_of_repeats_needed = int(jnp.ceil(number_of_races / num_modifiers)) # how many times we gotta multiply the list
+        # shuffle the channels as many times as we need repeats
         for repeat in range(number_of_repeats_needed):
             rng, shuffle_key = jax.random.split(rng)
             indices = jax.random.permutation(shuffle_key, num_modifiers)
-            # print(indices)
             for idx in indices:
                 shuffled_modifiers[channel].append(modifiers[channel][int(idx)])
+        # cap the list of modifiers off at the number of races we need
         shuffled_modifiers[channel] = shuffled_modifiers[channel][:number_of_races]
+    # transpose it such that we're grouping by race_idx rather than channel
     modifiers_per_race = [
         [
             shuffled_modifiers[channel][race_idx]
