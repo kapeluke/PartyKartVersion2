@@ -45,6 +45,8 @@ Steps to operate:
 This project is not complete yet, and there's a few things remaining:
 1. The ability to _Add_ and _Drop_ players in the middle of the tournament. This problem is complex and requires significant effort. Should be done it soon
 1. Fix ghost race warning calculation. Some ghost races are added despite no warning being present sometimes
+1. Add the ability to swap/defer the current race for one of the ones On Deck
+1. Add the ability for the user to swap out any of the modifiers on a given race. This will reroll the modifier from its channel
 1. Make ghost race warnings dependent on multiple people being added as well
 1. The _Play Again_ button at the end screen does not work. It should bring you back to the home screen or first race
 1. Fix the checkbox in Tweaks to be prettier
