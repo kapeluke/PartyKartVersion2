@@ -19,11 +19,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@600;800;900&display=swap" rel="stylesheet">
 
+    <!-- <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%23facc15' d='M448 96c0-17.7-14.3-32-32-32H32C14.3 64 0 78.3 0 96v320c0 17.7 14.3 32 32 32h384c17.7 0 32-14.3 32-32V96zM48 416V96h80v80H48v80h80v80H48v80zm160 0h-80v-80h80v80zm0-160h-80v-80h80v80zm0-160h-80V96h80v80zm160 320h-80v-80h80v80zm0-160h-80v-80h80v80zm0-160h-80V96h80v80zm48 240h-48v-80h48v80zm0-160h-48v-80h48v80z'/%3E%3C/svg%3E"> -->
+    <!-- <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🏁%3C/text%3E%3C/svg%3E"> -->
+
     <style>
-        .htmx-indicator { display: none; }
-        .htmx-request .htmx-indicator { display: flex; }
-        .htmx-request.htmx-indicator { display: flex; }
-        
         .font-kart { font-family: 'Fredoka One', cursive; letter-spacing: 0.05em; }
         body { font-family: 'Nunito', sans-serif; }
 
@@ -75,16 +74,14 @@
             </div>
             {% else %}
             <!-- In-Tournament View controls -->
-                {% if state.current_race_idx < state.races|length %}
-                <div class="flex gap-3">
-                    <button class="btn-tactile px-4 py-2 bg-blue-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
-                        <i class="fa-solid fa-user-plus mr-1"></i> New
-                    </button>
-                    <button class="btn-tactile px-4 py-2 bg-orange-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
-                        <i class="fa-solid fa-user-minus mr-1"></i> Drop
-                    </button>
-                </div>
-                {% endif %}
+            <div class="flex gap-3">
+                <button onclick="openAddPlayerDialog()" class="btn-tactile px-4 py-2 bg-blue-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
+                    <i class="fa-solid fa-user-plus mr-1"></i> New
+                </button>
+                <button onclick="document.getElementById('drop-player-dialog').showModal()" class="btn-tactile px-4 py-2 bg-orange-500 border-2 border-black rounded-xl text-sm font-bold text-white shadow-[3px_3px_0_#000]">
+                    <i class="fa-solid fa-user-minus mr-1"></i> Drop
+                </button>
+            </div>
             {% endif %}
         </div>
     </nav>
@@ -103,7 +100,6 @@
 
                 <h2 class="font-kart text-4xl mb-8 text-center text-blue-600 drop-shadow-[2px_2px_0_#000]">TOURNAMENT SETUP</h2>
                 
-                <!-- Added ID "setup-form" so we can grab it with JS for exporting -->
                 <form id="setup-form" hx-post="/generate" hx-indicator="#loading-overlay" class="space-y-8">
                     
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -274,7 +270,8 @@
                         hx-target="#modifier-rows" 
                         hx-swap="beforeend"
                         class="btn-tactile px-4 py-2 bg-blue-500 text-white font-black border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
-                    <i class="fa-solid fa-plus mr-1"></i> ADD ROW
+                    <i class="fa-solid fa-plus mr-1"></i>
+                    ADD ROW
                 </button>
             </div>
 
@@ -341,18 +338,6 @@
             </form>
         </dialog>
 
-        <!-- Loading Overlay -->
-        <div id="loading-overlay" class="htmx-indicator fixed inset-0 bg-blue-500/90 z-50 flex-col items-center justify-center backdrop-blur-md">
-            <div class="flex-row items-center justify-center">
-                <i class="fa-solid fa-motorcycle fa-bounce text-7xl text-yellow-400 mr-6 mb-6 drop-shadow-[4px_4px_0_#000]"></i>
-                <i class="fa-solid fa-car-side fa-bounce text-7xl text-yellow-400 ml-6 mb-6 drop-shadow-[4px_4px_0_#000]"></i>
-            </div>
-            <h2 class="font-kart text-4xl text-white drop-shadow-[3px_3px_0_#000] text-center px-4">
-                BUILDING THE TRACKS...
-            </h2>
-            <p class="font-bold text-blue-100 mt-4 text-lg bg-black/20 px-4 py-2 rounded-full border-2 border-black/30">Just a moment! (Estimated time: 60s)</p>
-        </div>
-
         {% else %}
             <!-- ========================================== -->
             <!-- TOURNAMENT VIEW -->
@@ -375,7 +360,12 @@
                                     {% if loop.index == 1 %}text-white drop-shadow-[1px_1px_0_#000]{% else %}text-gray-800{% endif %}">
                                     {{loop.index}}
                                 </span>
-                                <span class="font-black text-lg truncate w-24">{{p.name}}</span>
+                                <span class="font-black text-lg truncate max-w-[150px] {% if not p.active %}line-through text-gray-400{% endif %}">
+                                    {{p.name}}
+                                    {% if not p.active %}
+                                        <i class="fa-solid fa-door-open text-red-500 ml-1 text-sm" title="Eliminated"></i>
+                                    {% endif %}
+                                </span>
                             </div>
                             <span class="font-kart text-xl bg-black text-white px-2 py-1 rounded-lg border-2 border-black shadow-[inset_0_2px_0_rgba(255,255,255,0.3)]">{{p.points}}</span>
                         </div>
@@ -403,12 +393,11 @@
                     </div>
 
                     <!-- ROSTER VIEW (Default Active) -->
-                    <form id="roster-view" hx-post="/submit_race" class="bg-white rounded-3xl border-4 border-black shadow-[8px_8px_0_#000] p-6 sm:p-8 flex-1 flex flex-col justify-center relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMiIgZmlsbD0iIzAwMCIgZmlsbC1vcGFjaXR5PSIwLjA1Ii8+PC9zdmc+')]">
+                    <form id="roster-view" hx-post="/submit_race" hx-disabled-elt="this" class="bg-white rounded-3xl border-4 border-black shadow-[8px_8px_0_#000] p-6 sm:p-8 flex-1 flex flex-col justify-center relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMiIgZmlsbD0iIzAwMCIgZmlsbC1vcGFjaXR5PSIwLjA1Ii8+PC9zdmc+')]">
                         <div class="space-y-4 relative z-10">
                             {% for player_id in current_race.players %}
                             <div class="flex items-center justify-between bg-blue-50 p-3 sm:p-4 rounded-2xl border-4 border-black shadow-[4px_4px_0_#000]">
                                 <h3 class="font-kart text-2xl sm:text-3xl text-blue-700 drop-shadow-[1px_1px_0_#000] truncate max-w-[50%]">{{ state.players[player_id|int].name }}</h3>
-                                
                                 <select name="pos_{{player_id}}" required class="bg-white font-kart text-xl py-3 px-4 rounded-xl border-4 border-black focus:border-red-500 focus:ring-0 outline-none text-center w-28 sm:w-32 cursor-pointer shadow-[inset_0_4px_0_rgba(0,0,0,0.05)] appearance-none relative">
                                     <option value="" disabled selected>PLACE</option>
                                     <option value="1">1st</option>
@@ -467,7 +456,7 @@
                     </div>
                     
                     <div class="space-y-4">
-                        {% for offset in range(1, 4) %}
+                        {% for offset in range(1, 6) %}
                             {% set future_idx = state.current_race_idx + offset %}
                             {% if future_idx < state.races|length %}
                                 {% set future_race = state.races[future_idx] %}
@@ -600,15 +589,130 @@
                                 {% if loop.index == 1 %}text-white drop-shadow-[1px_1px_0_#000]{% else %}text-gray-800{% endif %}">
                                 {{loop.index}}
                             </span>
-                            <span class="font-black text-xl truncate max-w-[150px]">{{p.name}}</span>
+                            <span class="font-black text-lg truncate max-w-[150px] {% if not p.active %}line-through text-gray-400{% endif %}">
+                                {{p.name}}
+                                {% if not p.active %}
+                                    <i class="fa-solid fa-skull text-red-500 ml-1 text-sm" title="Eliminated"></i>
+                                {% endif %}
+                            </span>
                         </div>
                         <span class="font-kart text-2xl bg-black text-white px-3 py-1 rounded-xl border-2 border-black shadow-[inset_0_2px_0_rgba(255,255,255,0.3)]">{{p.points}} pt{% if p.points != 1 %}s{% endif %}</span>
                     </div>
                     {% endfor %}
                 </div>
             </dialog>
+
             {% endif %}
+
+            <!-- Add Player Dialog -->
+            <dialog id="add-player-dialog" 
+                    class="bg-white text-black p-6 md:p-8 rounded-3xl border-4 border-black shadow-[12px_12px_0_#000] backdrop:bg-black/60 backdrop:backdrop-blur-sm w-full max-w-2xl">
+                <div class="flex justify-between items-center mb-6 border-b-4 border-black pb-4">
+                    <h3 class="font-kart text-3xl text-blue-600 drop-shadow-[2px_2px_0_#000]">
+                        <i class="fa-solid fa-user-plus text-blue-600 drop-shadow-[1px_1px_0_#000] mr-2"></i> 
+                        ADD LATE RACER
+                    </h3>
+                    <button type="button" 
+                            hx-get="/components/new-add-player-row" 
+                            hx-target="#add-player-rows" 
+                            hx-swap="beforeend"
+                            class="btn-tactile px-4 py-2 bg-blue-500 text-white font-black border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                        <i class="fa-solid fa-plus mr-1"></i>
+                        ADD ROW
+                    </button>
+                </div>
+
+                <form hx-post="/api/add-players" hx-target="body" hx-swap="outerHTML" hx-indicator="#loading-overlay" onsubmit="document.getElementById('add-player-dialog').close()">
+                    
+                    <!-- Ghost Race Warning Container -->
+                    <div id="ghost-warnings"></div>
+
+                    <!-- Input Rows (Triggers validation check on input change) -->
+                    <div id="add-player-rows" class="space-y-4 max-h-[50vh] overflow-y-auto mb-6 p-2"
+                         oninput="checkGhostWarnings()">
+                        
+                        <!-- Initial Row -->
+                        <div class="add-player-row flex gap-3 items-center bg-gray-100 p-3 rounded-xl border-4 border-black shadow-[4px_4px_0_#000] relative group mb-4">
+                            <button type="button" onclick="this.closest('.add-player-row').remove(); checkGhostWarnings();" class="absolute -top-3 -right-3 bg-red-500 text-white w-8 h-8 rounded-full border-2 border-black font-bold shadow-[2px_2px_0_#000] opacity-0 group-hover:opacity-100 transition-opacity btn-tactile">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                            <div class="flex-1">
+                                <label class="block text-xs font-black tracking-wider text-gray-600 mb-1">NAME</label>
+                                <input type="text" name="new_names" required class="w-full bg-white border-2 border-black rounded-lg p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none">
+                            </div>
+                            <div class="w-20">
+                                <label class="block text-xs font-black tracking-wider text-gray-600 mb-1">MIN</label>
+                                <input type="number" name="min_races" min="0" required class="w-full bg-white border-2 border-black rounded-lg p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none text-center">
+                            </div>
+                            <div class="w-20">
+                                <label class="block text-xs font-black tracking-wider text-gray-600 mb-1">MAX</label>
+                                <input type="number" name="max_races" min="0" required class="w-full bg-white border-2 border-black rounded-lg p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none text-center">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-3 pt-4 border-t-4 border-black">
+                        <button type="button" onclick="document.getElementById('add-player-dialog').close()" class="btn-tactile px-6 py-3 bg-gray-200 text-gray-800 font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                            CANCEL
+                        </button>
+                        <button type="submit" class="btn-tactile px-6 py-3 bg-green-500 text-white font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                            CONFIRM ADDITIONS
+                        </button>
+                    </div>
+                </form>
+            </dialog>
+
+            <!-- Drop Player Dialog -->
+            <dialog id="drop-player-dialog" 
+                    class="bg-white text-black p-6 md:p-8 rounded-3xl border-4 border-black shadow-[12px_12px_0_#000] backdrop:bg-black/60 backdrop:backdrop-blur-sm w-full max-w-3xl">
+                <div class="flex justify-between items-center mb-6 border-b-4 border-black pb-4">
+                    <h3 class="font-kart text-3xl text-red-500 drop-shadow-[2px_2px_0_#000]">
+                        <i class="fa-solid fa-user-minus text-red-500 drop-shadow-[1px_1px_0_#000] mr-2"></i> 
+                        ELIMINATE RACERS
+                    </h3>
+                </div>
+                
+                <p class="font-bold text-gray-600 mb-6">Select the racers who are leaving the tournament early. Their remaining races will be recalculated. Their scores will stay in the leaderboard.</p>
+
+                <form hx-post="/api/drop-players" hx-target="body" hx-swap="outerHTML" hx-indicator="#loading-overlay" onsubmit="document.getElementById('drop-player-dialog').close()">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 max-h-[50vh] overflow-y-auto mb-6 p-2">
+                        {% for p_id, p_info in state.players.items() %}
+                            {% if p_info.active %}
+                            <label class="cursor-pointer">
+                                <input type="checkbox" name="drop_ids" value="{{ p_id }}" class="hidden peer">
+                                <div class="peer-checked:bg-red-500 peer-checked:text-red-100 peer-checked:border-red-900 peer-checked:line-through peer-checked:decoration-4 peer-checked:decoration-black peer-checked:scale-95 bg-gray-100 border-4 border-black rounded-xl p-4 font-black text-center shadow-[4px_4px_0_#000] transition-all truncate">
+                                    <i class="fa-solid fa-trash-can hidden peer-checked:inline-block mr-2 text-black"></i> {{ p_info.name }}
+                                </div>
+                            </label>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+
+                    <div class="flex justify-end gap-3 pt-4 border-t-4 border-black">
+                        <button type="button" onclick="document.getElementById('drop-player-dialog').close()" class="btn-tactile px-6 py-3 bg-gray-200 text-gray-800 font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                            CANCEL
+                        </button>
+                        <button type="submit" class="btn-tactile px-6 py-3 bg-red-500 text-white font-kart text-lg border-4 border-black rounded-xl shadow-[4px_4px_0_#000]">
+                            CONFIRM DROPS
+                        </button>
+                    </div>
+                </form>
+            </dialog>
+
         {% endif %}
+
+        <!-- Loading Overlay (Moved OUTSIDE the if/else blocks so it always exists!) -->
+        <!-- Uses Tailwind variants for a smooth opacity fade instead of clashing with display:none -->
+        <div id="loading-overlay" class="opacity-0 pointer-events-none [&.htmx-request]:opacity-100 [&.htmx-request]:pointer-events-auto transition-opacity duration-300 fixed inset-0 bg-blue-500/90 z-[9999] flex flex-col items-center justify-center backdrop-blur-md">
+            <div class="flex-row items-center justify-center">
+                <i class="fa-solid fa-motorcycle fa-bounce text-7xl text-yellow-400 mr-6 mb-6 drop-shadow-[4px_4px_0_#000]"></i>
+                <i class="fa-solid fa-car-side fa-bounce text-7xl text-yellow-400 ml-6 mb-6 drop-shadow-[4px_4px_0_#000]"></i>
+            </div>
+            <h2 class="font-kart text-4xl text-white drop-shadow-[3px_3px_0_#000] text-center px-4">
+                BUILDING THE TRACKS...
+            </h2>
+            <p class="font-bold text-blue-100 mt-4 text-lg bg-black/20 px-4 py-2 rounded-full border-2 border-black/30">Just a moment! (Estimated time: 60s)</p>
+        </div>
 
     </main>
 
@@ -656,6 +760,68 @@
                 modifiers.classList.add('flex');
                 btn.innerHTML = '<i class="fa-solid fa-arrow-left mr-1"></i> Current Race';
             }
+        }
+
+        // Global variables to store our mathematical boundaries locally
+        let globalSafeMin = 0;
+        let globalSafeMax = 99;
+
+        // Opens the dialog and immediately fetches the math from the backend
+        async function openAddPlayerDialog() {
+            document.getElementById('add-player-dialog').showModal();
+            
+            try {
+                const response = await fetch('/api/ghost-race-boundaries');
+                if (response.ok) {
+                    const data = await response.json();
+                    globalSafeMin = data.safe_min;
+                    globalSafeMax = data.safe_max;
+                    
+                    // Trigger a check immediately to show any global warnings instantly
+                    checkGhostWarnings();
+                }
+            } catch (error) {
+                console.error("Could not fetch safe boundaries:", error);
+            }
+        }
+
+        // Synchronous and fast! Runs purely locally on keystrokes.
+        function checkGhostWarnings() {
+            let warningsHTML = '';
+            
+            // Optional Global Warning Logic
+            if (globalSafeMax < globalSafeMin) { 
+                warningsHTML += `<div class="bg-yellow-400 border-4 border-black p-3 rounded-xl shadow-[4px_4px_0_#000] mb-4 flex items-start gap-3">
+                    <i class="fa-solid fa-triangle-exclamation text-2xl mt-1"></i>
+                    <div>
+                        <h4 class="font-kart text-xl text-black">WARNING</h4>
+                        <p class="font-bold text-sm text-yellow-900">The remaining core races are too unbalanced. Ghost races are mathematically unavoidable to finish the tournament.</p>
+                    </div>
+                </div>`;
+            }
+
+            const rows = document.querySelectorAll('.add-player-row');
+            
+            rows.forEach((row, index) => {
+                const nameInput = row.querySelector('input[name="new_names"]');
+                const minInput = row.querySelector('input[name="min_races"]');
+                const maxInput = row.querySelector('input[name="max_races"]');
+                
+                if (!nameInput || !minInput || !maxInput) return;
+
+                const name = nameInput.value.trim() || `Player ${index + 1}`;
+                const minRaces = parseInt(minInput.value);
+                const maxRaces = parseInt(maxInput.value);
+
+                if (!isNaN(maxRaces) && maxRaces > globalSafeMax) {
+                    warningsHTML += `<div class="bg-orange-100 border-2 border-orange-400 p-2 rounded-lg mb-2 text-sm font-bold text-orange-800"><i class="fa-solid fa-circle-exclamation mr-1"></i> ${name}: If this player races more than ${globalSafeMax} times, Ghost races will be required.</div>`;
+                }
+                if (!isNaN(minRaces) && minRaces < globalSafeMin) {
+                    warningsHTML += `<div class="bg-orange-100 border-2 border-orange-400 p-2 rounded-lg mb-2 text-sm font-bold text-orange-800"><i class="fa-solid fa-circle-exclamation mr-1"></i> ${name}: This player needs to race at least ${globalSafeMin} times to help fill out the remaining heats.</div>`;
+                }
+            });
+
+            document.getElementById('ghost-warnings').innerHTML = warningsHTML;
         }
     </script>
 </body>

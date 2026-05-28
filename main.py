@@ -11,6 +11,7 @@ from jax.numpy import ndarray
 import race_selection
 import race_ordering
 import modifier_shuffling
+import dynamic_patching
 
 
 app = FastAPI()
@@ -35,12 +36,12 @@ HYPERPARAMETER_DEFAULTS = {
 
 # --- IN-MEMORY STATE ---
 # For a production app, you'd use a database, but for a single-night tournament 
-# hosted locally, a global memory state is perfect and incredibly fast.
+#  hosted locally, a global memory state is perfect and incredibly fast.
 class TournamentState(BaseModel):
     is_active: bool = False
     p_count: int = 5
     n_races: int = 4
-    players: dict = {}  # {player_id: {"name": str, "points": int}}
+    players: dict = {}  # {player_id: {"name": str, "points": int, "active": bool}}
     races: list = []    # [{"id": int, "players": [id1, id2, ...], "modifiers": [{"short_text": str, "description": str}, ...], "results": {}}, ...]
     current_race_idx: int = 0
     history: list = []  # Stack for undo functionality
@@ -52,7 +53,9 @@ app_state = TournamentState()
 
 @dataclass
 class BackendCache:
+    incidence_matrix:Optional[ndarray] = None
     super_pools:Optional[ndarray] = None
+    shuffled_modifiers:Optional[list[dict[str,str]]] = None
 
 backend_cache = BackendCache()
 
@@ -127,7 +130,7 @@ async def generate_tournament(
     app_state.is_active = True
     app_state.p_count = p_count
     app_state.n_races = n_races
-    app_state.players = {i: {"id": i, "name": name, "points": 0} for i, name in enumerate(player_names)}
+    app_state.players = {i: {"id": i, "name": name, "points": 0, "active": True} for i, name in enumerate(player_names)}
     app_state.current_race_idx = 0
 
     # app_state.hyperparameters['ilp_timeout'] = float(ilp_timeout) # unused at the moment
@@ -149,8 +152,6 @@ async def generate_tournament(
     print(A)
     print(C)
 
-    backend_cache.super_pools = super_pools # safe the super pools so we can reuse them later for adding and dropping players
-
     kwargs_ordering = {
         'steps':app_state.hyperparameters['num_steps'],
         'num_climbers':app_state.hyperparameters['num_climbers'],
@@ -160,6 +161,9 @@ async def generate_tournament(
     permutation_order = race_ordering.find_best_race_order(app_state.hyperparameters['seed'], A, n_races, **kwargs_ordering)
     permuted_A = race_ordering.permute_incidence_matrix(A, permutation_order)
     print(permuted_A)
+
+    backend_cache.incidence_matrix = permuted_A
+    backend_cache.super_pools = super_pools # safe the super pools so we can reuse them later for adding and dropping players
 
     ones_indices = race_ordering.get_indices_of_ones(permuted_A)
     roster_in_each_race = [{
@@ -175,7 +179,9 @@ async def generate_tournament(
     app_state.races = roster_in_each_race
 
     # Shuffle the modifiers and apply to each race
-    modifiers = modifier_shuffling.shuffle_out_modifiers(app_state.hyperparameters['seed'], len(app_state.races), app_state.modifiers)
+    num_modifiers_to_get = len(app_state.races)
+    modifiers = modifier_shuffling.shuffle_out_modifiers(app_state.hyperparameters['seed'], num_modifiers_to_get, app_state.modifiers)
+    backend_cache.shuffled_modifiers = modifiers # store them for later for adding and dropping players
     for idx in range(len(app_state.races)):
         app_state.races[idx]['modifiers'] = modifiers[idx]
 
@@ -267,8 +273,175 @@ async def undo_last_action(request: Request):
     )
 
 
-# --- IMPORT / EXPORT ENDPOINTS ---
+# --- ADDING / DROPPING PLAYER ENDPOINTS ---
 
+@app.get('/components/new-add-player-row', response_class=HTMLResponse)
+async def new_add_player_row(request: Request):
+    """Returns a new row for the Add Player dialog."""
+    return """
+    <div class="add-player-row flex gap-3 items-center bg-gray-100 p-3 rounded-xl border-4 border-black shadow-[4px_4px_0_#000] relative group mb-4">
+        <button type="button" onclick="this.closest('.add-player-row').remove(); checkGhostWarnings();" class="absolute -top-3 -right-3 bg-red-500 text-white w-8 h-8 rounded-full border-2 border-black font-bold shadow-[2px_2px_0_#000] opacity-0 group-hover:opacity-100 transition-opacity btn-tactile">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div class="flex-1">
+            <label class="block text-xs font-black tracking-wider text-gray-600 mb-1">NAME</label>
+            <input type="text" name="new_names" required class="w-full bg-white border-2 border-black rounded-lg p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none">
+        </div>
+        <div class="w-20">
+            <label class="block text-xs font-black tracking-wider text-gray-600 mb-1">MIN</label>
+            <input type="number" name="min_races" min="0" required class="w-full bg-white border-2 border-black rounded-lg p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none text-center">
+        </div>
+        <div class="w-20">
+            <label class="block text-xs font-black tracking-wider text-gray-600 mb-1">MAX</label>
+            <input type="number" name="max_races" min="0" required class="w-full bg-white border-2 border-black rounded-lg p-2 font-bold focus:ring-4 focus:ring-yellow-400 outline-none text-center">
+        </div>
+    </div>
+    """
+
+
+@app.get('/api/ghost-race-boundaries')
+async def get_ghost_race_boundaries():
+    A = backend_cache.incidence_matrix
+    F = app_state.current_race_idx
+    if A is None:
+        return {"safe_min": 0, "safe_max": 99}
+    safe_min, safe_max = dynamic_patching.get_ghost_safe_boundaries(A, F)
+    # FastAPI automatically converts dictionaries to JSON responses!
+    return {"safe_min": safe_min, "safe_max": safe_max}
+
+
+@app.post('/api/add-players', response_class=HTMLResponse)
+async def add_players(
+    request: Request,
+    new_names: list[str] = Form(...),
+    min_races: list[int] = Form(...),
+    max_races: list[int] = Form(...)
+):
+    global app_state
+    global backend_cache
+    save_history()
+
+    boundaries = list(zip(min_races, max_races))
+    F = app_state.current_race_idx
+    
+    # Run dynamic patching algorithm
+    new_A = dynamic_patching.add_players(
+        backend_cache.super_pools, 
+        backend_cache.incidence_matrix, 
+        F, 
+        boundaries, 
+        **app_state.hyperparameters
+    )
+    backend_cache.incidence_matrix = new_A
+    print(new_A)
+    print(new_A.shape)
+    print(race_selection.get_co_occurrence_matrix(new_A))
+
+    # Add new players to state
+    start_id = max(app_state.players.keys()) + 1 if app_state.players else 0
+    for i, name in enumerate(new_names):
+        new_id = start_id + i
+        app_state.players[new_id] = {"id": new_id, "name": name, "points": 0, "active": True}
+    app_state.p_count += len(new_names)
+
+    # Check to see if we need some more modifiers
+    if new_A.shape[1] > len(backend_cache.shuffled_modifiers):
+        # need to get some more modifiers
+        num_more_needed = new_A.shape[1] - len(backend_cache.shuffled_modifiers)
+        more_modifiers = modifier_shuffling.shuffle_out_modifiers(app_state.hyperparameters['seed'] + 1, num_more_needed, app_state.modifiers)
+        backend_cache.shuffled_modifiers += more_modifiers
+
+    # Delete races from F onwards
+    app_state.races = app_state.races[:F]
+    # Reconstruct the remaining races from the new incidence matrix starting at F
+    ones_indices = race_ordering.get_indices_of_ones(new_A)
+    # Add new races from F onwards
+    for r in range(F, new_A.shape[1]):
+        racer_ids = [int(p) for (p, col_r) in ones_indices if int(col_r) == r]
+        app_state.races.append({'id': r, 'players': racer_ids, 'modifiers': backend_cache.shuffled_modifiers[r], 'results': {}})
+
+    # Shuffle new modifiers for any newly added races
+    # unmodified_races = [r for r in app_state.races if not r.get('modifiers')]
+    # if unmodified_races:
+    #     new_modifiers = modifier_shuffling.shuffle_out_modifiers(app_state.hyperparameters['seed'], len(unmodified_races), app_state.modifiers)
+    #     for i, race in enumerate(unmodified_races):
+    #         race['modifiers'] = new_modifiers[i]
+        
+    print(app_state.players)
+
+    return templates.TemplateResponse(
+        request=request, 
+        name="index.html", 
+        context={"state": app_state, "leaderboard": get_sorted_leaderboard()}
+    )
+
+
+@app.post('/api/drop-players', response_class=HTMLResponse)
+async def drop_players(request: Request, drop_ids: list[int] = Form(default=[])):
+    global app_state
+    global backend_cache
+    if not drop_ids:
+        # User submitted without selecting anyone
+        return templates.TemplateResponse(
+            request=request, 
+            name="index.html", 
+            context={"state": app_state, "leaderboard": get_sorted_leaderboard()}
+        )
+        
+    save_history()
+    F = app_state.current_race_idx
+
+    new_A = dynamic_patching.drop_players(
+        backend_cache.super_pools, 
+        backend_cache.incidence_matrix, 
+        F, 
+        drop_ids, # Passing the raw matrix rows to the math function
+        **app_state.hyperparameters
+    )
+    backend_cache.incidence_matrix = new_A
+    print(new_A)
+    print(new_A.shape)
+    print(race_selection.get_co_occurrence_matrix(new_A))
+
+    # Update active status and mapping
+    for pid in drop_ids:
+        if pid in app_state.players:
+            app_state.players[pid]["active"] = False
+
+    # Check to see if we need some more modifiers
+    if new_A.shape[1] > len(backend_cache.shuffled_modifiers):
+        # need to get some more modifiers
+        num_more_needed = new_A.shape[1] - len(backend_cache.shuffled_modifiers)
+        more_modifiers = modifier_shuffling.shuffle_out_modifiers(app_state.hyperparameters['seed'] + 1, num_more_needed, app_state.modifiers)
+        backend_cache.shuffled_modifiers += more_modifiers
+
+    # Delete the races that come during and after F
+    app_state.races = app_state.races[:F]
+    # Add any races from F onwards
+    ones_indices = race_ordering.get_indices_of_ones(new_A)
+    for r in range(F, new_A.shape[1]):
+        racer_ids = [int(p) for (p, col_r) in ones_indices if int(col_r) == r]
+        app_state.races.append({'id': r, 'players': racer_ids, 'modifiers': backend_cache.shuffled_modifiers[r], 'results': {}})
+
+    # Shuffle new modifiers for any newly added races
+    # unmodified_races = [r for r in app_state.races if not r.get('modifiers')]
+    # if unmodified_races:
+    #     new_modifiers = modifier_shuffling.shuffle_out_modifiers(
+    #         app_state.hyperparameters['seed'], 
+    #         len(unmodified_races), 
+    #         app_state.modifiers
+    #     )
+    #     for i, race in enumerate(unmodified_races):
+    #         race['modifiers'] = new_modifiers[i]
+
+    return templates.TemplateResponse(
+        request=request, 
+        name="index.html", 
+        context={"state": app_state, "leaderboard": get_sorted_leaderboard()}
+    )
+
+
+# --- IMPORT / EXPORT ENDPOINTS ---
 @app.post('/api/export-state')
 async def export_state(
     request: Request,
@@ -289,6 +462,7 @@ async def export_state(
         media_type="application/json"
     )
 
+
 @app.post('/api/import-state', response_class=HTMLResponse)
 async def import_state(request: Request, file: UploadFile = File(...)):
     """Receives a JSON upload, updates the state, and triggers an HTMX full page re-render."""
@@ -298,16 +472,17 @@ async def import_state(request: Request, file: UploadFile = File(...)):
         config = json.loads(content)
         app_state.p_count = config.get("p_count", 5)
         app_state.n_races = config.get("n_races", 4)
-        app_state.hyperparameters = config.get("hyperparameters", HYPERPARAMETER_DEFAULTS.copy())
+        new_hyperparameters = config.get("hyperparameters", HYPERPARAMETER_DEFAULTS.copy())
         app_state.modifiers = config.get("modifiers", [])
-        
         # Temporarily store player names so the setup screen can pre-fill the inputs
         player_names = config.get("player_names", [])
         app_state.players = {i: {"id": i, "name": name, "points": 0} for i, name in enumerate(player_names)}
-        
     except Exception as e:
         print("Error loading config:", e)
         # Could return an error toast here in the future
+    # add this for backwards compatibility
+    for hyperparameter, default in HYPERPARAMETER_DEFAULTS.items():
+        app_state.hyperparameters[hyperparameter] = new_hyperparameters.get(hyperparameter, default)
         
     # Re-render the full index template with the newly imported state
     return templates.TemplateResponse(
